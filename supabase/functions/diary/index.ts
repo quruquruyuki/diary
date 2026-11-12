@@ -11,11 +11,26 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-const NOTION_API_KEY = Deno.env.get("NOTION_API_KEY") ?? "";
-const NOTION_DATABASE_ID = Deno.env.get("NOTION_DATABASE_ID") ?? "";
-const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? "";
-const ALLOWED_EMAIL = (Deno.env.get("ALLOWED_EMAIL") ?? "").trim().toLowerCase();
-const OPENAI_MODEL = (Deno.env.get("OPENAI_MODEL") ?? "").trim() || "gpt-6-luna";
+// Secrets は名前のゆれ（空白・大文字小文字・アンダースコアの有無）に強く読み取る。値の前後の空白や " も取り除く。
+const norm = (k: string) => k.toUpperCase().replace(/[^A-Z0-9]/g, "");
+function env(name: string, ...aliases: string[]): string {
+  const wanted = new Set([name, ...aliases].map(norm));
+  for (const [k, v] of Object.entries(Deno.env.toObject())) {
+    if (wanted.has(norm(k))) return v.trim().replace(/^["']|["']$/g, "").trim();
+  }
+  return "";
+}
+// 設定済みの Secrets の「名前だけ」を返す（値は返さない）。設定ミスの確認用
+const customSecretNames = () =>
+  Object.keys(Deno.env.toObject())
+    .filter((k) => !/^(SUPABASE_|SB_|DENO_|PATH$|HOME$|HOSTNAME$|LANG$|TZ$|PWD$|EDGE_|AWS_|OTEL_)/.test(k))
+    .sort();
+
+const NOTION_API_KEY = env("NOTION_API_KEY", "NOTION_KEY", "NOTION_TOKEN");
+const NOTION_DATABASE_ID = env("NOTION_DATABASE_ID", "NOTION_DB_ID", "DATABASE_ID").replace(/-/g, "");
+const OPENAI_API_KEY = env("OPENAI_API_KEY", "OPENAI_KEY");
+const ALLOWED_EMAIL = env("ALLOWED_EMAIL").toLowerCase();
+const OPENAI_MODEL = env("OPENAI_MODEL") || "gpt-6-luna";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 
@@ -347,7 +362,10 @@ function checkConfig(needsOpenAI: boolean) {
   if (!NOTION_API_KEY) missing.push("NOTION_API_KEY");
   if (!NOTION_DATABASE_ID) missing.push("NOTION_DATABASE_ID");
   if (needsOpenAI && !OPENAI_API_KEY) missing.push("OPENAI_API_KEY");
-  if (missing.length) throw new HttpError(500, `Secrets が未設定です: ${missing.join(", ")}`);
+  if (missing.length) {
+    const names = customSecretNames();
+    throw new HttpError(500, `Secrets が未設定です: ${missing.join(", ")}（いま見えている名前: ${names.length ? names.join(", ") : "なし"}）`);
+  }
 }
 
 Deno.serve(async (req) => {
