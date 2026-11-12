@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="日記">
+<meta name="theme-color" content="#F7F5F0">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="manifest" href="manifest.json">
+<title>日記</title>
+<style>
+  :root {
+    --bg: #F7F5F0;
+    --card: #FFFFFF;
+    --ink: #37352F;
+    --sub: #8A877F;
+    --line: #E7E3DA;
+    --field: #FBFAF7;
+    --accent: #2EA7FF;
+    --accent-soft: #E6F4FF;
+    --sun: #D9534F;
+    --sat: #3B7DD8;
+    --radius: 14px;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+    font-size: 16px; line-height: 1.6;
+  }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
+  .hidden { display: none !important; }
+
+  /* ── ログイン ── */
+  #login { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .login-box { width: 100%; max-width: 360px; background: var(--card); border-radius: var(--radius); padding: 28px 22px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .login-box h1 { font-size: 22px; margin: 0 0 4px; }
+  .login-box p { margin: 0 0 20px; color: var(--sub); font-size: 14px; }
+  .login-box input { width: 100%; font-size: 16px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--field); margin-bottom: 10px; color: var(--ink); }
+  .primary { width: 100%; background: var(--ink); color: #fff; font-weight: 700; padding: 14px; border-radius: 12px; font-size: 17px; }
+  .primary:disabled { opacity: .45; }
+  .err { color: var(--sun); font-size: 14px; margin-top: 10px; min-height: 1em; }
+
+  /* ── 本体 ── */
+  #app { max-width: 640px; margin: 0 auto; padding: 0 16px calc(110px + var(--safe-b)); }
+  header { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: calc(env(safe-area-inset-top, 0px) + 12px) 0 10px; }
+  .date-row { display: flex; align-items: center; gap: 4px; }
+  .date-btn { flex: 1; text-align: left; font-size: 22px; font-weight: 700; letter-spacing: .01em; padding: 4px 0; }
+  .date-btn small { display: block; font-size: 12px; font-weight: 400; color: var(--sub); }
+  .icon-btn { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; font-size: 18px; color: var(--sub); }
+  .icon-btn:active { background: var(--line); }
+  .today-btn { font-size: 13px; color: var(--accent); padding: 6px 10px; border-radius: 8px; }
+  .today-btn:active { background: var(--accent-soft); }
+
+  .tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 4px; }
+  .tag { padding: 6px 12px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); font-size: 14px; color: var(--sub); }
+  .tag.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+
+  .card { background: var(--card); border-radius: var(--radius); padding: 14px 14px 12px; margin-top: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .card h2 { font-size: 15px; margin: 0 0 8px; display: flex; align-items: center; gap: 6px; }
+  textarea {
+    width: 100%; min-height: 96px; resize: none; overflow: hidden;
+    font: inherit; font-size: 16px; color: var(--ink);
+    background: var(--field); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+  }
+  textarea:focus { outline: none; border-color: var(--accent); background: #fff; }
+
+  .section-title { display: flex; align-items: center; justify-content: space-between; margin: 26px 2px 0; }
+  .section-title h3 { font-size: 13px; color: var(--sub); margin: 0; font-weight: 600; letter-spacing: .05em; }
+  .regen { font-size: 13px; color: var(--accent); padding: 4px 8px; border-radius: 8px; }
+  .regen:disabled { color: var(--sub); opacity: .6; }
+  .q-source { font-size: 12px; color: var(--sub); margin-bottom: 4px; }
+  .q-text { font-weight: 700; font-size: 15.5px; margin: 0 0 10px; line-height: 1.55; }
+  .skeleton { height: 1.1em; border-radius: 6px; background: linear-gradient(90deg, #EFECE5 25%, #F7F5F0 50%, #EFECE5 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; margin: 6px 0; }
+  .skeleton.short { width: 60%; }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  .q-error { color: var(--sun); font-size: 14px; }
+
+  .savebar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; padding: 12px 16px calc(12px + var(--safe-b)); background: linear-gradient(to top, var(--bg) 70%, rgba(247,245,240,0)); }
+  .savebar .primary { max-width: 608px; margin: 0 auto; display: block; }
+  .draft-note { text-align: center; font-size: 12px; color: var(--sub); margin-top: 6px; min-height: 1em; }
+
+  .footer-links { text-align: center; margin-top: 28px; font-size: 13px; }
+  .footer-links button { color: var(--sub); text-decoration: underline; }
+
+  /* ── カレンダー（下から出るシート）── */
+  .sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,.28); z-index: 20; display: flex; align-items: flex-end; justify-content: center; }
+  .sheet { width: 100%; max-width: 520px; background: var(--card); border-radius: 18px 18px 0 0; padding: 14px 14px calc(18px + var(--safe-b)); animation: up .18s ease-out; }
+  @keyframes up { from { transform: translateY(30px); opacity: .6; } }
+  .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .cal-head strong { font-size: 18px; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cal-wd { text-align: center; font-size: 12px; color: var(--sub); padding: 4px 0; }
+  .cal-day { position: relative; aspect-ratio: 1 / 1; max-height: 52px; border-radius: 10px; font-size: 15px; display: grid; place-items: center; }
+  .cal-day:active { background: var(--line); }
+  .cal-day.sun { color: var(--sun); } .cal-day.sat { color: var(--sat); }
+  .cal-day.today { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .cal-day.sel { background: var(--accent); color: #fff; }
+  .cal-day.has::after { content: ""; position: absolute; bottom: 6px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+  .cal-day.sel.has::after { background: #fff; }
+  .cal-day.future { opacity: .35; }
+  .cal-loading { text-align: center; font-size: 12px; color: var(--sub); height: 18px; }
+
+  .toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 14px); transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 12px; font-size: 14px; z-index: 30; box-shadow: 0 4px 14px rgba(0,0,0,.15); max-width: 90vw; }
+  .toast.bad { background: var(--sun); }
+</style>
+</head>
+<body>
+
+<!-- ログイン画面 -->
+<section id="login" class="hidden">
+  <form class="login-box" id="loginForm">
+    <h1>📓 日記</h1>
+    <p>ログインしてください</p>
+    <input type="email" id="email" placeholder="メールアドレス" autocomplete="username" required>
+    <input type="password" id="password" placeholder="パスワード" autocomplete="current-password" required>
+    <button class="primary" type="submit" id="loginBtn">ログイン</button>
+    <div class="err" id="loginErr"></div>
+  </form>
+</section>
+
+<!-- 日記画面 -->
+<main id="app" class="hidden">
+  <header>
+    <div class="date-row">
+      <button class="icon-btn" id="prevDay" aria-label="前の日">‹</button>
+      <button class="date-btn" id="dateBtn"><span id="dateText"></span><small>タップで日付を選ぶ</small></button>
+      <button class="today-btn" id="todayBtn">今日</button>
+      <button class="icon-btn" id="nextDay" aria-label="次の日">›</button>
+    </div>
+  </header>
+  <div class="tags" id="tags"></div>
+
+  <div class="card">
+    <h2>🗓 今日の出来事</h2>
+    <textarea id="events" placeholder="何があった？"></textarea>
+  </div>
+  <div class="card">
+    <h2>💡 気持ち・アイデア</h2>
+    <textarea id="feelings" placeholder="どう感じた？思いついたことは？"></textarea>
+  </div>
+
+  <div class="section-title">
+    <h3>💬 過去の自分との対話</h3>
+    <button class="regen" id="regenBtn">↻ 問いを作り直す</button>
+  </div>
+  <div id="questions"></div>
+
+  <div class="footer-links"><button id="logoutBtn">ログアウト</button></div>
+</main>
+
+<div class="savebar hidden" id="savebar">
+  <button class="primary" id="saveBtn">保存</button>
+  <div class="draft-note" id="draftNote"></div>
+</div>
+
+<div id="calendar" class="sheet-bg hidden">
+  <div class="sheet" role="dialog" aria-label="日付を選ぶ">
+    <div class="cal-head">
+      <button class="icon-btn" id="calPrev" aria-label="前の月">‹</button>
+      <strong id="calTitle"></strong>
+      <button class="icon-btn" id="calNext" aria-label="次の月">›</button>
+    </div>
+    <div class="cal-grid" id="calGrid"></div>
+    <div class="cal-loading" id="calLoading"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// ===== 設定 =====
+const SUPABASE_URL = "https://oqtyorwlrnrcyjxiassg.supabase.co";
+const SUPABASE_KEY = "sb_publishable_5KRsDfHG07lsUL7uUr6zpQ_2ehucxbJ"; // 公開用キー（ブラウザに置いてOK）
+const TAGS = ["日常", "良いこと", "学び", "後悔", "悪いこと", "仕事", "記録", "アイデア", "肌荒れ"];
+const MONTH_LABEL = { 1: "1か月前", 12: "1年前" };
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = (id) => document.getElementById(id);
+
+// ===== 小物 =====
+const store = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
+function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+function fromYmd(s) { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); }
+function addDays(s, n) { const d = fromYmd(s); d.setDate(d.getDate() + n); return ymd(d); }
+const todayStr = () => ymd(new Date());
+function jpDate(s) { const d = fromYmd(s); return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${"日月火水木金土"[d.getDay()]}）`; }
+function shortDate(s) { const d = fromYmd(s); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`; }
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+let toastTimer;
+function toast(msg, bad = false) {
+  document.querySelectorAll(".toast").forEach((t) => t.remove());
+  const t = document.createElement("div");
+  t.className = "toast" + (bad ? " bad" : "");
+  t.textContent = msg;
+  document.body.appendChild(t);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.remove(), bad ? 4000 : 2000);
+}
+
+function autoGrow(el) { el.style.height = "auto"; el.style.height = Math.max(96, el.scrollHeight + 2) + "px"; }
+
+// サーバー処理（Edge Function）呼び出し
+async function api(body) {
+  const { data, error } = await sb.functions.invoke("diary", { body });
+  if (error) {
+    let msg = error.message;
+    try { const j = await error.context.json(); if (j?.error) msg = j.error; } catch {}
+    if (error.context?.status === 401) { await sb.auth.signOut(); showLogin(); }
+    throw new Error(msg);
+  }
+  return data;
+}
+
+// ===== 状態 =====
+const state = {
+  date: todayStr(),
+  tags: [],
+  questions: null,     // [{months, sourceDate, question}]
+  answers: ["", ""],
+  qLoading: false,
+  qError: "",
+  saving: false,
+  diaryDates: new Set(),
+  loadedMonths: new Set(),
+};
+let qRequestId = 0;
+
+// 日付ごとの下書き（入力途中の内容と、作った問い）をこの端末に保存
+const draftKey = (d) => `diary:draft:${d}`;
+function saveDraft() {
+  const draft = {
+    events: $("events").value,
+    feelings: $("feelings").value,
+    tags: state.tags,
+    questions: state.questions,
+    answers: state.answers,
+  };
+  store.set(draftKey(state.date), draft);
+  const hasText = draft.events || draft.feelings || draft.answers.some(Boolean);
+  $("draftNote").textContent = hasText ? "下書きはこの端末に自動で残ります" : "";
+}
+
+// ===== 描画 =====
+function renderTags() {
+  $("tags").innerHTML = "";
+  for (const t of TAGS) {
+    const b = document.createElement("button");
+    b.className = "tag" + (state.tags.includes(t) ? " on" : "");
+    b.textContent = t;
+    b.onclick = () => {
+      state.tags = state.tags.includes(t) ? state.tags.filter((x) => x !== t) : [...state.tags, t];
+      renderTags(); saveDraft();
+    };
+    $("tags").appendChild(b);
+  }
+}
+
+function renderQuestions() {
+  const box = $("questions");
+  box.innerHTML = "";
+  $("regenBtn").disabled = state.qLoading;
+
+  if (state.qLoading) {
+    for (const m of [1, 12]) {
+      box.insertAdjacentHTML("beforeend",
+        `<div class="card"><div class="q-source">${MONTH_LABEL[m]}の日記から問いを作っています…</div>
+         <div class="skeleton"></div><div class="skeleton short"></div></div>`);
+    }
+    return;
+  }
+  if (state.qError) {
+    box.insertAdjacentHTML("beforeend",
+      `<div class="card"><div class="q-error">問いを作れませんでした：${escapeHtml(state.qError)}</div>
+       <div class="q-source" style="margin-top:6px">「↻ 問いを作り直す」で再試行できます。問いなしでも保存できます。</div></div>`);
+    return;
+  }
+  (state.questions || []).forEach((q, i) => {
+    const source = q.sourceDate
+      ? `${MONTH_LABEL[q.months] ?? q.months + "か月前"}（${shortDate(q.sourceDate)}）の日記から`
+      : `${MONTH_LABEL[q.months] ?? ""}の日記がないので、今日の問い`;
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `<div class="q-source">${escapeHtml(source)}</div>
+      <p class="q-text">${escapeHtml(q.question)}</p>
+      <textarea placeholder="思ったことを書いてみる"></textarea>`;
+    const ta = card.querySelector("textarea");
+    ta.value = state.answers[i] || "";
+    ta.addEventListener("input", () => { state.answers[i] = ta.value; autoGrow(ta); saveDraft(); });
+    box.appendChild(card);
+    requestAnimationFrame(() => autoGrow(ta));
+  });
+}
+
+function renderSave() {
+  const btn = $("saveBtn");
+  btn.disabled = state.saving || state.qLoading;
+  btn.textContent = state.saving ? "保存中…" : state.qLoading ? "問いを準備中…" : "保存";
+}
+
+function renderDate() {
+  $("dateText").textContent = jpDate(state.date);
+  $("nextDay").style.visibility = state.date >= todayStr() ? "hidden" : "visible";
+  $("todayBtn").style.visibility = state.date === todayStr() ? "hidden" : "visible";
+}
+
+// ===== 日付の切り替え =====
+function openDate(d) {
+  state.date = d;
+  const draft = store.get(draftKey(d)) || {};
+  $("events").value = draft.events || "";
+  $("feelings").value = draft.feelings || "";
+  state.tags = draft.tags || [];
+  state.answers = draft.answers || ["", ""];
+  state.questions = draft.questions || null;
+  state.qError = "";
+  renderDate(); renderTags();
+  autoGrow($("events")); autoGrow($("feelings"));
+  saveDraft();
+  if (state.questions) { state.qLoading = false; renderQuestions(); renderSave(); }
+  else loadQuestions();
+  window.scrollTo({ top: 0 });
+}
+
+async function loadQuestions() {
+  const id = ++qRequestId;
+  const forDate = state.date;
+  state.qLoading = true; state.qError = "";
+  renderQuestions(); renderSave();
+  try {
+    const { questions } = await api({ action: "questions", date: forDate });
+    if (id !== qRequestId) return;
+    state.questions = questions;
+    state.answers = ["", ""];
+    saveDraft();
+  } catch (e) {
+    if (id !== qRequestId) return;
+    state.qError = e.message;
+  }
+  state.qLoading = false;
+  renderQuestions(); renderSave();
+}
+
+// ===== 保存 =====
+async function save() {
+  const events = $("events").value.trim();
+  const feelings = $("feelings").value.trim();
+  const qa = (state.questions || []).map((q, i) => ({ question: q.question, answer: (state.answers[i] || "").trim() }));
+  if (!events && !feelings && !qa.some((x) => x.answer)) { toast("まだ何も書かれていません", true); return; }
+
+  state.saving = true; renderSave();
+  try {
+    await api({ action: "save", date: state.date, events, feelings, tags: state.tags, qa });
+    store.del(draftKey(state.date));
+    state.diaryDates.add(state.date);
+    toast("Notionに保存しました ✓");
+    state.saving = false;
+    // 保存後は入力を空にして、問いは残す（Pythonista版と同じ動き）
+    $("events").value = ""; $("feelings").value = "";
+    state.tags = []; state.answers = ["", ""];
+    autoGrow($("events")); autoGrow($("feelings"));
+    renderTags(); renderQuestions(); saveDraft();
+  } catch (e) {
+    state.saving = false;
+    toast("保存に失敗しました：" + e.message, true);
+  }
+  renderSave();
+}
+
+// ===== カレンダー =====
+let calMonth; // その月の1日
+function openCalendar() {
+  const d = fromYmd(state.date);
+  calMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+  $("calendar").classList.remove("hidden");
+  renderCalendar();
+}
+function closeCalendar() { $("calendar").classList.add("hidden"); }
+
+async function loadMonthDates(y, m) {
+  const key = `${y}-${m}`;
+  if (state.loadedMonths.has(key)) return;
+  $("calLoading").textContent = "日記のある日を確認中…";
+  try {
+    const from = ymd(new Date(y, m, 1)), to = ymd(new Date(y, m + 1, 0));
+    const { dates } = await api({ action: "dates", from, to });
+    dates.forEach((d) => state.diaryDates.add(d));
+    state.loadedMonths.add(key);
+  } catch (e) {
+    $("calLoading").textContent = "日記のある日を取得できませんでした";
+    return;
+  }
+  $("calLoading").textContent = "";
+}
+
+function renderCalendar() {
+  const y = calMonth.getFullYear(), m = calMonth.getMonth();
+  $("calTitle").textContent = `${y}年${m + 1}月`;
+  const now = new Date();
+  $("calNext").style.visibility = (y > now.getFullYear() || (y === now.getFullYear() && m >= now.getMonth())) ? "hidden" : "visible";
+  const grid = $("calGrid");
+  grid.innerHTML = "";
+  "日月火水木金土".split("").forEach((w) => grid.insertAdjacentHTML("beforeend", `<div class="cal-wd">${w}</div>`));
+  const first = new Date(y, m, 1).getDay();
+  for (let i = 0; i < first; i++) grid.insertAdjacentHTML("beforeend", "<div></div>");
+  const last = new Date(y, m + 1, 0).getDate();
+  const today = todayStr();
+  for (let d = 1; d <= last; d++) {
+    const s = ymd(new Date(y, m, d));
+    const wd = new Date(y, m, d).getDay();
+    const b = document.createElement("button");
+    b.className = "cal-day" + (wd === 0 ? " sun" : wd === 6 ? " sat" : "")
+      + (s === today ? " today" : "") + (s === state.date ? " sel" : "")
+      + (state.diaryDates.has(s) ? " has" : "") + (s > today ? " future" : "");
+    b.textContent = d;
+    if (s <= today) b.onclick = () => { closeCalendar(); if (s !== state.date) openDate(s); };
+    grid.appendChild(b);
+  }
+  const key = `${y}-${m}`;
+  if (!state.loadedMonths.has(key)) loadMonthDates(y, m).then(() => {
+    if (calMonth.getFullYear() === y && calMonth.getMonth() === m) renderCalendar();
+  });
+}
+
+// ===== 画面切り替え =====
+function showLogin() {
+  $("login").classList.remove("hidden");
+  $("app").classList.add("hidden"); $("savebar").classList.add("hidden");
+}
+function showApp() {
+  $("login").classList.add("hidden");
+  $("app").classList.remove("hidden"); $("savebar").classList.remove("hidden");
+  openDate(todayStr());
+}
+
+// ===== イベント =====
+$("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("loginBtn").disabled = true; $("loginErr").textContent = "";
+  const { error } = await sb.auth.signInWithPassword({ email: $("email").value.trim(), password: $("password").value });
+  $("loginBtn").disabled = false;
+  if (error) { $("loginErr").textContent = "ログインできませんでした（" + error.message + "）"; return; }
+  showApp();
+});
+$("logoutBtn").onclick = async () => { await sb.auth.signOut(); showLogin(); };
+$("dateBtn").onclick = openCalendar;
+$("prevDay").onclick = () => openDate(addDays(state.date, -1));
+$("nextDay").onclick = () => { const n = addDays(state.date, 1); if (n <= todayStr()) openDate(n); };
+$("todayBtn").onclick = () => openDate(todayStr());
+$("calPrev").onclick = () => { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1); renderCalendar(); };
+$("calNext").onclick = () => { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1); renderCalendar(); };
+$("calendar").addEventListener("click", (e) => { if (e.target.id === "calendar") closeCalendar(); });
+$("regenBtn").onclick = () => {
+  if (state.answers.some(Boolean) && !confirm("書きかけの回答は消えます。問いを作り直しますか？")) return;
+  loadQuestions();
+};
+$("saveBtn").onclick = save;
+for (const id of ["events", "feelings"]) {
+  $(id).addEventListener("input", () => { autoGrow($(id)); saveDraft(); });
+}
+
+// ===== 起動 =====
+(async () => {
+  const { data } = await sb.auth.getSession();
+  if (data.session) showApp(); else showLogin();
+})();
+</script>
+</body>
+</html>
