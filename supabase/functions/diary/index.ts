@@ -141,12 +141,13 @@ async function getDiaryDates(from: string, to: string): Promise<string[]> {
   return [...set].sort();
 }
 
-// ── 対象日（なければ前日・翌日）の日記を探す ──
+// ── 対象日の日記を探す（なければ前後1週間で一番近い日。同じ近さなら前の日を優先）──
+const SEARCH_DAYS = 7;
 async function findDiaryNear(target: Date): Promise<{ id: string; date: string } | null> {
   const pages = await queryDiaries({
     and: [
-      { property: "Date", date: { on_or_after: fmt(addDays(target, -1)) } },
-      { property: "Date", date: { on_or_before: fmt(addDays(target, 1)) } },
+      { property: "Date", date: { on_or_after: fmt(addDays(target, -SEARCH_DAYS)) } },
+      { property: "Date", date: { on_or_before: fmt(addDays(target, SEARCH_DAYS)) } },
     ],
   });
   const byDate = new Map<string, string>();
@@ -154,9 +155,11 @@ async function findDiaryNear(target: Date): Promise<{ id: string; date: string }
     const d = pageDate(p);
     if (d && !byDate.has(d)) byDate.set(d, p.id);
   }
-  for (const d of [target, addDays(target, -1), addDays(target, 1)]) {
-    const id = byDate.get(fmt(d));
-    if (id) return { id, date: fmt(d) };
+  for (let i = 0; i <= SEARCH_DAYS; i++) {
+    for (const d of i === 0 ? [target] : [addDays(target, -i), addDays(target, i)]) {
+      const id = byDate.get(fmt(d));
+      if (id) return { id, date: fmt(d) };
+    }
   }
   return null;
 }
@@ -254,7 +257,14 @@ async function chat(prompt: string, answerTokens: number): Promise<string> {
   throw new HttpError(502, "OpenAI から問いを受け取れませんでした");
 }
 
-function questionFromDiary(diaryText: string) {
+// 似た問いを避けるための一言（直前に出た問いを渡す）
+function avoidText(avoid: string[]) {
+  const list = avoid.map((q) => String(q).trim()).filter(Boolean).slice(0, 5);
+  if (!list.length) return "";
+  return `\n・次の問いとは違う角度・違う言い回しにすること:\n${list.map((q) => `  - ${q}`).join("\n")}`;
+}
+
+function questionFromDiary(diaryText: string, avoid: string[] = []) {
   const prompt = `以下は過去の私の日記の一部です。
 - 「その日の出来事」
 - 「気持ち・アイデア」
@@ -264,9 +274,10 @@ function questionFromDiary(diaryText: string) {
 問いの条件:
 ・内省を促す深い問いであること
 ・考えや感情の変化、成長を感じられるような視点を含むこと
+・日記の中の具体的な出来事や言葉に触れること
 ・問いの形式で
 ・簡潔であること
-・問いの文だけを出力すること（前置きや「問い:」などの見出しは不要）
+・問いの文だけを出力すること（前置きや「問い:」などの見出しは不要）${avoidText(avoid)}
 
 日記内容:
 ${diaryText}
@@ -275,26 +286,48 @@ ${diaryText}
   return chat(prompt, 300);
 }
 
-function randomQuestion() {
-  return chat(
-    "自己分析を深めるための簡単な質問を1つ作ってください。様々なテーマの中から選んでください。時事ネタを含むことがあってもいいです。質問の文だけを出力してください。",
-    200,
-  );
+// ランダムな問いのテーマ（毎回ここからくじ引きで1つ選ぶ）
+const THEMES = [
+  "仕事のやりがい", "仕事での人間関係", "家族との時間", "子育て", "パートナーとの関係", "友人",
+  "お金の使い方", "健康と体", "睡眠と休み方", "趣味", "子どもの頃の記憶", "学生時代",
+  "これからの目標", "5年後・10年後の自分", "最近の小さな失敗", "最近うれしかったこと",
+  "感謝していること", "苦手なこと", "習慣", "時間の使い方", "住んでいる街", "季節の移り変わり",
+  "最近読んだ・見たもの", "大切にしている価値観", "決断の仕方", "怒りやイライラ", "不安との付き合い方",
+  "自分の強み", "人から言われてうれしかった言葉", "挑戦してみたいこと",
+];
+
+function randomQuestion(theme: string, avoid: string[] = []) {
+  const prompt = `自己分析を深めるための簡単な質問を1つ作ってください。
+条件:
+・テーマは「${theme}」
+・ありきたりな質問ではなく、具体的な場面を思い浮かべて答えられる質問にすること
+・簡潔であること
+・質問の文だけを出力すること（前置きや「質問:」などの見出しは不要）${avoidText(avoid)}`;
+  return chat(prompt, 200);
 }
 
 const cleanQuestion = (q: string) =>
   q.replace(/^\s*(問い|質問)\s*[:：]\s*/, "").replace(/^["「]|["」]$/g, "").trim();
 
-async function buildQuestion(base: Date, months: number) {
-  const target = monthsBefore(base, months);
-  const found = await findDiaryNear(target);
+const pickTheme = () => THEMES[Math.floor(Math.random() * THEMES.length)];
+
+type Question = { months: number; mode: "diary" | "random"; sourceDate: string | null; theme: string | null; question: string };
+
+async function buildRandom(months: number, avoid: string[]): Promise<Question> {
+  const theme = pickTheme();
+  return { months, mode: "random", sourceDate: null, theme, question: cleanQuestion(await randomQuestion(theme, avoid)) };
+}
+
+async function buildQuestion(base: Date, months: number, mode: "diary" | "random" = "diary", avoid: string[] = []): Promise<Question> {
+  if (mode === "random") return buildRandom(months, avoid);
+  const found = await findDiaryNear(monthsBefore(base, months));
   if (found) {
     const text = (await pageText(found.id)).join("\n").trim();
     if (text) {
-      return { months, sourceDate: found.date, question: cleanQuestion(await questionFromDiary(text)) };
+      return { months, mode: "diary", sourceDate: found.date, theme: null, question: cleanQuestion(await questionFromDiary(text, avoid)) };
     }
   }
-  return { months, sourceDate: null, question: cleanQuestion(await randomQuestion()) };
+  return buildRandom(months, avoid);
 }
 
 // ── 保存 ──
@@ -383,6 +416,15 @@ Deno.serve(async (req) => {
         const base = parseDate(body.date);
         const questions = await Promise.all([buildQuestion(base, 1), buildQuestion(base, 12)]);
         return json({ questions });
+      }
+      case "question": {
+        // 1問だけ作り直す（mode: "diary" = 過去の日記から / "random" = ランダム）
+        checkConfig(true);
+        const base = parseDate(body.date);
+        const months = Number(body.months) || 1;
+        const mode = body.mode === "random" ? "random" : "diary";
+        const avoid = Array.isArray(body.avoid) ? body.avoid.map(String) : [];
+        return json({ question: await buildQuestion(base, months, mode, avoid) });
       }
       case "save":
         checkConfig(false);

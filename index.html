@@ -80,6 +80,10 @@
   .skeleton.short { width: 60%; }
   @keyframes shimmer { to { background-position: -200% 0; } }
   .q-error { color: var(--sun); font-size: 14px; }
+  .q-actions { display: flex; gap: 8px; margin-top: 8px; justify-content: flex-end; }
+  .q-btn { font-size: 13px; color: var(--sub); padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); }
+  .q-btn:active { background: var(--line); }
+  .q-btn:disabled { opacity: .45; }
 
   .savebar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; padding: 12px 16px calc(12px + var(--safe-b)); background: linear-gradient(to top, var(--bg) 70%, rgba(247,245,240,0)); }
   .savebar .primary { max-width: 608px; margin: 0 auto; display: block; }
@@ -147,7 +151,6 @@
 
   <div class="section-title">
     <h3>💬 過去の自分との対話</h3>
-    <button class="regen" id="regenBtn">↻ 問いを作り直す</button>
   </div>
   <div id="questions"></div>
 
@@ -229,6 +232,7 @@ const state = {
   answers: ["", ""],
   qLoading: false,
   qError: "",
+  cardLoading: [false, false],
   saving: false,
   diaryDates: new Set(),
   loadedMonths: new Set(),
@@ -265,10 +269,20 @@ function renderTags() {
   }
 }
 
+// 古い下書き（mode がない）は、元の日記の日付があれば「日記から」とみなす
+const isDiaryQ = (q) => q.mode === "diary" || (!q.mode && !!q.sourceDate);
+
+function questionSource(q) {
+  const when = MONTH_LABEL[q.months] ?? `${q.months}か月前`;
+  if (isDiaryQ(q) && q.sourceDate) return `${when}（${shortDate(q.sourceDate)}）の日記から`;
+  const theme = q.theme ? `（テーマ：${q.theme}）` : "";
+  if (q.picked === "random") return `🎲 ランダムな問い${theme}`;
+  return `${when}の前後1週間に日記がないので、ランダムな問い${theme}`;
+}
+
 function renderQuestions() {
   const box = $("questions");
   box.innerHTML = "";
-  $("regenBtn").disabled = state.qLoading;
 
   if (state.qLoading) {
     for (const m of [1, 12]) {
@@ -279,32 +293,71 @@ function renderQuestions() {
     return;
   }
   if (state.qError) {
-    box.insertAdjacentHTML("beforeend",
-      `<div class="card"><div class="q-error">問いを作れませんでした：${escapeHtml(state.qError)}</div>
-       <div class="q-source" style="margin-top:6px">「↻ 問いを作り直す」で再試行できます。問いなしでも保存できます。</div></div>`);
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `<div class="q-error">問いを作れませんでした：${escapeHtml(state.qError)}</div>
+      <div class="q-source" style="margin-top:6px">問いなしでも保存できます。</div>
+      <div class="q-actions"><button class="q-btn">↻ もう一度作る</button></div>`;
+    card.querySelector("button").onclick = loadQuestions;
+    box.appendChild(card);
     return;
   }
   (state.questions || []).forEach((q, i) => {
-    const source = q.sourceDate
-      ? `${MONTH_LABEL[q.months] ?? q.months + "か月前"}（${shortDate(q.sourceDate)}）の日記から`
-      : `${MONTH_LABEL[q.months] ?? ""}の日記がないので、今日の問い`;
     const card = document.createElement("div");
     card.className = "card";
-    card.innerHTML = `<div class="q-source">${escapeHtml(source)}</div>
+    if (state.cardLoading[i]) {
+      card.innerHTML = `<div class="q-source">新しい問いを作っています…</div>
+        <div class="skeleton"></div><div class="skeleton short"></div>`;
+      box.appendChild(card);
+      return;
+    }
+    card.innerHTML = `<div class="q-source">${escapeHtml(questionSource(q))}</div>
       <p class="q-text">${escapeHtml(q.question)}</p>
-      <textarea placeholder="思ったことを書いてみる"></textarea>`;
+      <textarea placeholder="思ったことを書いてみる"></textarea>
+      <div class="q-actions">
+        <button class="q-btn" data-mode="diary">📓 日記から</button>
+        <button class="q-btn" data-mode="random">🎲 ランダム</button>
+      </div>`;
     const ta = card.querySelector("textarea");
     ta.value = state.answers[i] || "";
     ta.addEventListener("input", () => { state.answers[i] = ta.value; autoGrow(ta); saveDraft(); });
+    card.querySelectorAll(".q-btn").forEach((b) => { b.onclick = () => refreshCard(i, b.dataset.mode); });
     box.appendChild(card);
     requestAnimationFrame(() => autoGrow(ta));
   });
 }
 
+// 1枚のカードの問いだけ入れ替える
+async function refreshCard(i, mode) {
+  const q = state.questions?.[i];
+  if (!q || state.cardLoading[i]) return;
+  if ((state.answers[i] || "").trim() && !confirm("この問いへの回答は消えます。問いを入れ替えますか？")) return;
+  const forDate = state.date;
+  // 「日記から」は過去の日記から作り直す（その頃の日記がなければサーバー側でランダムになる）
+  const want = mode === "random" ? "random" : "diary";
+  const avoid = (state.questions || []).map((x) => x.question);
+  state.cardLoading[i] = true;
+  renderQuestions(); renderSave();
+  try {
+    const { question } = await api({ action: "question", date: forDate, months: q.months, mode: want, avoid });
+    if (state.date !== forDate) return;
+    question.picked = want === "random" ? "random" : null;
+    state.questions[i] = question;
+    state.answers[i] = "";
+    saveDraft();
+  } catch (e) {
+    if (state.date === forDate) toast("問いを作れませんでした：" + e.message, true);
+  } finally {
+    state.cardLoading[i] = false;
+    if (state.date === forDate) { renderQuestions(); renderSave(); }
+  }
+}
+
 function renderSave() {
   const btn = $("saveBtn");
-  btn.disabled = state.saving || state.qLoading;
-  btn.textContent = state.saving ? "保存中…" : state.qLoading ? "問いを準備中…" : "保存";
+  const busy = state.qLoading || state.cardLoading.some(Boolean);
+  btn.disabled = state.saving || busy;
+  btn.textContent = state.saving ? "保存中…" : busy ? "問いを準備中…" : "保存";
 }
 
 function renderDate() {
@@ -323,6 +376,7 @@ function openDate(d) {
   state.answers = draft.answers || ["", ""];
   state.questions = draft.questions || null;
   state.qError = "";
+  state.cardLoading = [false, false];
   renderDate(); renderTags();
   autoGrow($("events")); autoGrow($("feelings"));
   saveDraft();
@@ -459,10 +513,6 @@ $("todayBtn").onclick = () => openDate(todayStr());
 $("calPrev").onclick = () => { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1); renderCalendar(); };
 $("calNext").onclick = () => { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1); renderCalendar(); };
 $("calendar").addEventListener("click", (e) => { if (e.target.id === "calendar") closeCalendar(); });
-$("regenBtn").onclick = () => {
-  if (state.answers.some(Boolean) && !confirm("書きかけの回答は消えます。問いを作り直しますか？")) return;
-  loadQuestions();
-};
 $("saveBtn").onclick = save;
 for (const id of ["events", "feelings"]) {
   $(id).addEventListener("input", () => { autoGrow($(id)); saveDraft(); });
