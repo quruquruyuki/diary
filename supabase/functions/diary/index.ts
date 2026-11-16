@@ -7,7 +7,7 @@
 //   OPENAI_API_KEY      … OpenAI のキー（sk-...）
 //   ALLOWED_EMAIL       … このアプリを使えるログイン用メールアドレス（自分のもの）
 // 任意:
-//   OPENAI_MODEL        … 既定は gpt-6-luna（もっと賢くしたいなら gpt-6.1-terra）
+//   OPENAI_MODEL        … 共通設定（app_settings: diary/model）が読めないときの予備。既定は gpt-6-luna
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -30,11 +30,33 @@ const NOTION_API_KEY = env("NOTION_API_KEY", "NOTION_KEY", "NOTION_TOKEN");
 const NOTION_DATABASE_ID = env("NOTION_DATABASE_ID", "NOTION_DB_ID", "DATABASE_ID").replace(/-/g, "");
 const OPENAI_API_KEY = env("OPENAI_API_KEY", "OPENAI_KEY");
 const ALLOWED_EMAIL = env("ALLOWED_EMAIL").toLowerCase();
-const OPENAI_MODEL = env("OPENAI_MODEL") || "gpt-6-luna";
+const DEFAULT_MODEL = env("OPENAI_MODEL") || "gpt-6-luna";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 
 const MAX_RETRIES = 5;
+
+// ── 全アプリ共通の設定（Supabase の app_settings テーブル）──
+// AIモデルや料金単価はここから読む。1分間は使い回す。読めないときは従来の値（Secret・既定値）を使う
+const SETTINGS_TTL = 60_000;
+let settingsCache: { at: number; map: Record<string, unknown> } | null = null;
+async function appSettings(app: string): Promise<Record<string, unknown>> {
+  if (settingsCache && Date.now() - settingsCache.at < SETTINGS_TTL) return settingsCache.map;
+  const map: Record<string, unknown> = {};
+  try {
+    const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const q = `select=app,key,value&app=in.${encodeURIComponent(`("global","${app}")`)}`;
+    const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/rest/v1/app_settings?${q}`, { headers: { apikey: key, Authorization: `Bearer ${key}` } });
+    if (r.ok) for (const row of await r.json()) map[row.app === "global" ? `global.${row.key}` : row.key] = row.value;
+    else console.error("app_settings", r.status, await r.text());
+  } catch (e) { console.error("app_settings", e); }
+  settingsCache = { at: Date.now(), map };
+  return map;
+}
+async function setting(app: string, key: string, fallback: string): Promise<string> {
+  const v = (await appSettings(app))[key];
+  return typeof v === "string" && v.trim() ? v.trim() : fallback;
+}
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -217,6 +239,7 @@ async function pageText(blockId: string, depth = 0): Promise<string[]> {
 const isLegacyModel = (m: string) => /^gpt-4/.test(m);
 
 async function chat(prompt: string, answerTokens: number): Promise<string> {
+  const OPENAI_MODEL = await setting("diary", "model", DEFAULT_MODEL);
   // deno-lint-ignore no-explicit-any
   const payload: any = {
     model: OPENAI_MODEL,
